@@ -54,6 +54,11 @@
     border: 1px solid #e5e3dc;
   }
   button.secondary:hover { background: #f5f3ee; }
+  button.kakao {
+    background: #FEE500;
+    color: #3C1E1E;
+  }
+  button.kakao:hover { background: #FDD835; }
   .row { display: flex; gap: 8px; flex-wrap: wrap; }
   .row > button { flex: 1; min-width: 100px; }
   .refined-box {
@@ -101,6 +106,13 @@
     transform: translateX(-50%) translateY(0);
   }
   .toast strong { color: #93c5fd; font-weight: 500; }
+  .section-divider {
+    font-size: 11px;
+    color: #999;
+    margin: 14px 0 8px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
 </style>
 </head>
 <body>
@@ -131,11 +143,18 @@
   <ul id="changesMade" class="changes"></ul>
 
   <div style="margin-top: 14px;">
+    <div class="section-divider">AI한테 물어보기</div>
     <span class="label">버튼 클릭 → 자동 복사 후 새 탭 열림 → Ctrl+V (Mac은 Cmd+V)</span>
     <div class="row">
       <button onclick="sendTo('claude')">Claude로</button>
       <button onclick="sendTo('chatgpt')">ChatGPT로</button>
       <button onclick="sendTo('gemini')">Gemini로</button>
+    </div>
+
+    <div class="section-divider">공유하기</div>
+    <div class="row">
+      <button class="kakao" onclick="shareKakao()">카카오톡으로</button>
+      <button class="secondary" onclick="shareNative()">다른 앱으로</button>
       <button class="secondary" onclick="copyOnly()">복사만</button>
     </div>
   </div>
@@ -145,7 +164,7 @@
 
 <div id="toast" class="toast"></div>
 
-<p class="footer-note">모든 처리는 본인 브라우저에서 일어납니다. API 키는 외부로 전송되지 않아요. (v3)</p>
+<p class="footer-note">모든 처리는 본인 브라우저에서 일어납니다. API 키는 외부로 전송되지 않아요. (v4)</p>
 
 <script>
 const MODEL = 'gemini-2.5-flash-lite';
@@ -231,11 +250,7 @@ async function sendTo(target) {
     chatgpt: 'https://chatgpt.com/',
     gemini: 'https://gemini.google.com/app'
   };
-  const names = {
-    claude: 'Claude',
-    chatgpt: 'ChatGPT',
-    gemini: 'Gemini'
-  };
+  const names = { claude: 'Claude', chatgpt: 'ChatGPT', gemini: 'Gemini' };
 
   try {
     await navigator.clipboard.writeText(currentRefined);
@@ -245,7 +260,51 @@ async function sendTo(target) {
     showToast(`복사 완료! ${names[target]} 새 탭에서 <strong>${shortcut}</strong>로 붙여넣기`);
   } catch (err) {
     window.open(urls[target], '_blank');
-    showToast(`${names[target]} 탭을 열었어요. 자동 복사가 안 됐으니 "복사만" 버튼으로 직접 복사해주세요.`);
+    showToast(`${names[target]} 탭을 열었어요. "복사만" 버튼으로 직접 복사해주세요.`);
+  }
+}
+
+function shareKakao() {
+  if (!currentRefined) return;
+  const isMobile = /Android|iPhone|iPad/.test(navigator.userAgent);
+
+  if (isMobile && navigator.share) {
+    navigator.share({
+      title: '다듬어진 질문',
+      text: currentRefined
+    }).then(() => {
+      showToast('공유 메뉴에서 카카오톡을 선택해주세요');
+    }).catch(() => {
+      fallbackKakao();
+    });
+  } else {
+    fallbackKakao();
+  }
+}
+
+async function fallbackKakao() {
+  try {
+    await navigator.clipboard.writeText(currentRefined);
+    showToast('복사됐어요. 카카오톡 열어서 <strong>Ctrl+V</strong>로 붙여넣기');
+    window.open('https://web.whatsapp.com/', '_blank');
+  } catch (err) {
+    showError('자동 복사 실패. "복사만" 버튼을 눌러주세요.');
+  }
+}
+
+async function shareNative() {
+  if (!currentRefined) return;
+  if (navigator.share) {
+    try {
+      await navigator.share({
+        title: '다듬어진 질문',
+        text: currentRefined
+      });
+    } catch (err) {
+      // 사용자가 공유 취소
+    }
+  } else {
+    showToast('이 브라우저는 공유 기능을 지원하지 않아요. "복사만"을 사용하세요.');
   }
 }
 
@@ -253,7 +312,7 @@ async function copyOnly() {
   if (!currentRefined) return;
   try {
     await navigator.clipboard.writeText(currentRefined);
-    showToast('복사됐어요. 원하는 AI에 붙여넣으세요.');
+    showToast('복사됐어요. 원하는 AI나 카카오톡에 붙여넣으세요.');
   } catch (err) {
     showError('복사 실패. 브라우저가 클립보드 접근을 막았어요.');
   }
