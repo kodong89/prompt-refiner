@@ -65,11 +65,7 @@
     white-space: pre-wrap;
     font-size: 14px;
   }
-  .changes {
-    font-size: 12px;
-    color: #555;
-    margin-top: 10px;
-  }
+  .changes { font-size: 12px; color: #555; margin-top: 10px; }
   .changes li { margin: 2px 0; }
   .hidden { display: none; }
   .error {
@@ -80,13 +76,31 @@
     font-size: 13px;
     color: #8a1c1c;
   }
-  .footer-note {
-    font-size: 11px;
-    color: #999;
-    text-align: center;
-    margin-top: 24px;
-  }
+  .footer-note { font-size: 11px; color: #999; text-align: center; margin-top: 24px; }
   .loading { color: #888; font-size: 13px; font-style: italic; }
+  .toast {
+    position: fixed;
+    bottom: 28px;
+    left: 50%;
+    transform: translateX(-50%) translateY(20px);
+    background: #1f2937;
+    color: white;
+    padding: 12px 20px;
+    border-radius: 10px;
+    font-size: 14px;
+    opacity: 0;
+    transition: opacity 0.25s, transform 0.25s;
+    pointer-events: none;
+    box-shadow: 0 4px 14px rgba(0,0,0,0.15);
+    z-index: 1000;
+    max-width: 90%;
+    text-align: center;
+  }
+  .toast.show {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+  }
+  .toast strong { color: #93c5fd; font-weight: 500; }
 </style>
 </head>
 <body>
@@ -117,21 +131,25 @@
   <ul id="changesMade" class="changes"></ul>
 
   <div style="margin-top: 14px;">
-    <span class="label">이 질문을 어디로 보낼까요?</span>
+    <span class="label">버튼 클릭 → 자동 복사 후 새 탭 열림 → Ctrl+V (Mac은 Cmd+V)</span>
     <div class="row">
       <button onclick="sendTo('claude')">Claude로</button>
       <button onclick="sendTo('chatgpt')">ChatGPT로</button>
       <button onclick="sendTo('gemini')">Gemini로</button>
-      <button class="secondary" onclick="copyToClipboard()">복사하기</button>
+      <button class="secondary" onclick="copyOnly()">복사만</button>
     </div>
   </div>
 </div>
 
 <div id="error" class="hidden"></div>
 
-<p class="footer-note">모든 처리는 본인 브라우저에서 일어납니다. API 키는 외부로 전송되지 않아요.</p>
+<div id="toast" class="toast"></div>
+
+<p class="footer-note">모든 처리는 본인 브라우저에서 일어납니다. API 키는 외부로 전송되지 않아요. (v3)</p>
 
 <script>
+const MODEL = 'gemini-2.5-flash-lite';
+
 const SYSTEM_PROMPT = `당신은 "프롬프트 통역사"입니다.
 사람들이 AI에게 두서없이, 모호하게 던진 말을 받아서 AI가 잘 답할 수 있는 명확한 프롬프트로 다시 써주는 역할입니다.
 
@@ -142,17 +160,10 @@ const SYSTEM_PROMPT = `당신은 "프롬프트 통역사"입니다.
 4. 6요소를 머릿속에 두되, 사용자가 말한 만큼만 채우세요: 역할, 태스크, 맥락, 입력, 제약, 출력 형식.
 5. 한국어 입력이면 한국어로, 영어면 영어로 다듬으세요.
 
-반드시 다음 JSON 형식으로만 응답하세요 (코드펜스 ` + "```" + ` 없이):
+반드시 다음 JSON 형식으로만 응답하세요:
 {
   "refined_prompt": "다듬어진 프롬프트",
   "changes_made": ["어떻게 다듬었는지 1~3개 짧은 설명"]
-}
-
-예시 입력: "어 그 우리 회사 매출 떨어졌는데 분석 좀 해줘"
-예시 출력:
-{
-  "refined_prompt": "당신은 재무 분석가입니다. 첨부된 매출 데이터를 분석하여 (1) 매출 하락의 주요 원인 3가지, (2) 정량적 근거, (3) 개선 액션 아이템을 한국어 마크다운 보고서로 정리해주세요.",
-  "changes_made": ["역할(재무 분석가)을 명시했어요", "결과를 구조화된 보고서 형식으로 받도록 했어요", "필러는 정리했어요"]
 }`;
 
 const apiKeyInput = document.getElementById('apiKey');
@@ -170,14 +181,8 @@ async function refine() {
 
   hideError();
 
-  if (!apiKey) {
-    showError('API 키를 먼저 입력해주세요.');
-    return;
-  }
-  if (!rawInput) {
-    showError('다듬을 내용을 입력해주세요.');
-    return;
-  }
+  if (!apiKey) { showError('API 키를 먼저 입력해주세요.'); return; }
+  if (!rawInput) { showError('다듬을 내용을 입력해주세요.'); return; }
 
   const refinedEl = document.getElementById('refinedText');
   const changesEl = document.getElementById('changesMade');
@@ -186,25 +191,16 @@ async function refine() {
   document.getElementById('result').classList.remove('hidden');
 
   try {
-    const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=${apiKey}`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contents: [{
-            parts: [{ text: rawInput }]
-          }],
-          systemInstruction: {
-            parts: [{ text: SYSTEM_PROMPT }]
-          },
-          generationConfig: {
-            temperature: 0.3,
-            responseMimeType: 'application/json'
-          }
-        })
-      }
-    );
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent?key=${apiKey}`;
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents: [{ parts: [{ text: rawInput }] }],
+        systemInstruction: { parts: [{ text: SYSTEM_PROMPT }] },
+        generationConfig: { temperature: 0.3, responseMimeType: 'application/json' }
+      })
+    });
 
     if (!response.ok) {
       const errText = await response.text();
@@ -224,26 +220,53 @@ async function refine() {
     }
   } catch (err) {
     showError(`처리 중 오류: ${err.message}`);
-    document.getElementById('result').classList.add('hidden');
   }
 }
 
-function sendTo(target) {
+async function sendTo(target) {
   if (!currentRefined) return;
-  const text = encodeURIComponent(currentRefined);
+
   const urls = {
-    claude: `https://claude.ai/new?q=${text}`,
-    chatgpt: `https://chatgpt.com/?q=${text}`,
-    gemini: `https://gemini.google.com/app?q=${text}`
+    claude: 'https://claude.ai/new',
+    chatgpt: 'https://chatgpt.com/',
+    gemini: 'https://gemini.google.com/app'
   };
-  window.open(urls[target], '_blank');
+  const names = {
+    claude: 'Claude',
+    chatgpt: 'ChatGPT',
+    gemini: 'Gemini'
+  };
+
+  try {
+    await navigator.clipboard.writeText(currentRefined);
+    window.open(urls[target], '_blank');
+    const isMac = /Mac|iPhone|iPad/.test(navigator.platform);
+    const shortcut = isMac ? 'Cmd+V' : 'Ctrl+V';
+    showToast(`복사 완료! ${names[target]} 새 탭에서 <strong>${shortcut}</strong>로 붙여넣기`);
+  } catch (err) {
+    window.open(urls[target], '_blank');
+    showToast(`${names[target]} 탭을 열었어요. 자동 복사가 안 됐으니 "복사만" 버튼으로 직접 복사해주세요.`);
+  }
 }
 
-function copyToClipboard() {
+async function copyOnly() {
   if (!currentRefined) return;
-  navigator.clipboard.writeText(currentRefined).then(() => {
-    alert('복사됐어요. 원하는 AI에 붙여넣으시면 됩니다.');
-  });
+  try {
+    await navigator.clipboard.writeText(currentRefined);
+    showToast('복사됐어요. 원하는 AI에 붙여넣으세요.');
+  } catch (err) {
+    showError('복사 실패. 브라우저가 클립보드 접근을 막았어요.');
+  }
+}
+
+function showToast(html) {
+  const toast = document.getElementById('toast');
+  toast.innerHTML = html;
+  toast.classList.add('show');
+  clearTimeout(showToast._timer);
+  showToast._timer = setTimeout(() => {
+    toast.classList.remove('show');
+  }, 3500);
 }
 
 function showError(msg) {
